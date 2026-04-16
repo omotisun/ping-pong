@@ -492,6 +492,9 @@ let countdownVal = 3, countdownTimer = null;
 // For cross-device: use PeerJS (CDN)
 let peer = null, conn = null;
 let signalingMode = 'broadcast'; // 'broadcast' or 'peerjs'
+let connectRetryTimer = null;
+let connectAttempts = 0;
+const MAX_CONNECT_ATTEMPTS = 6;
 
 // ---- PeerJS CDN ----
 // Loaded dynamically
@@ -634,94 +637,95 @@ function peerIdFor(room, role) {
   return 'pong--' + safe + '--' + role;
 }
 
+function clearConnectRetry() {
+  if (connectRetryTimer) {
+    clearTimeout(connectRetryTimer);
+    connectRetryTimer = null;
+  }
+}
+
+function resetPeerGuestState() {
+  clearConnectRetry();
+  if (conn) {
+    try { conn.close(); } catch (e) {}
+    conn = null;
+  }
+}
+
+function connectToHostPeer() {
+  const hostId = peerIdFor(roomName, 'host');
+  connectAttempts++;
+  status('Connecting to room... (' + connectAttempts + '/' + MAX_CONNECT_ATTEMPTS + ')', '');
+
+  conn = peer.connect(hostId, { reliable: true });
+  let opened = false;
+
+  conn.on('open', () => {
+    opened = true;
+    clearConnectRetry();
+    conn.send({ type: 'join', guestName: myName });
+    status('Connected! Starting...', 'ok');
+  });
+  conn.on('data', handlePeerData);
+  conn.on('error', () => {
+    if (opened) return;
+    retryPeerGuestConnection();
+  });
+  conn.on('close', () => {
+    if (!opened) {
+      retryPeerGuestConnection();
+      return;
+    }
+    if (gameRunning) { toast('Opponent disconnected'); backToLobby(); }
+  });
+}
+
+function retryPeerGuestConnection() {
+  clearConnectRetry();
+
+  if (connectAttempts >= MAX_CONNECT_ATTEMPTS) {
+    status('Could not reach host. Ask Player 1 to create the room first, then try JOIN again.', 'err');
+    return;
+  }
+
+  resetPeerGuestState();
+  connectRetryTimer = setTimeout(() => {
+    if (peer && !peer.destroyed) connectToHostPeer();
+  }, 1200);
+}
+
 function setupPeerHost() {
   const id = peerIdFor(roomName, 'host');
-  peer = new Peer(id, {
-    debug: 1,
-    config: {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
-      ]
-    }
-  });
-  
+  peer = new Peer(id);
   peer.on('open', () => {
     status('Room created! Waiting for opponent...', 'ok');
-    console.log('My peer ID:', id);
   });
-  
   peer.on('error', (e) => {
-    console.error('Peer error:', e);
     if (e.type === 'unavailable-id') {
       status('Room already exists! Try another name.', 'err');
       cancelRoom();
-    } else if (e.type === 'peer-unavailable') {
-      status('Room not found. Check room name.', 'err');
     } else {
       status('Connection error: ' + e.message, 'err');
     }
   });
-  
   peer.on('connection', (c) => {
     conn = c;
     conn.on('open', () => {
       conn.send({ type: 'welcome', hostName: myName });
-      status('Opponent connected!', 'ok');
     });
     conn.on('data', handlePeerData);
     conn.on('close', () => { if (gameRunning) { toast('Opponent disconnected'); backToLobby(); } });
-    conn.on('error', (e) => { console.error('Connection error:', e); });
   });
 }
 
 function setupPeerGuest() {
+  connectAttempts = 0;
+  clearConnectRetry();
   status('Connecting to room...', '');
-  peer = new Peer(undefined, {
-    debug: 1,
-    config: {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
-      ]
-    }
+  peer = new Peer(); // random ID for guest
+  peer.on('open', () => {
+    connectToHostPeer();
   });
-  
-  let connectAttempts = 0;
-  const maxAttempts = 3;
-  
-  function tryConnect() {
-    const hostId = peerIdFor(roomName, 'host');
-    console.log('Attempting to connect to:', hostId);
-    status('Connecting to host... (' + (connectAttempts + 1) + ')', '');
-    conn = peer.connect(hostId, { reliable: true });
-    
-    conn.on('open', () => {
-      conn.send({ type: 'join', guestName: myName });
-      status('Connected! Starting...', 'ok');
-    });
-    
-    conn.on('data', handlePeerData);
-    
-    conn.on('close', () => { 
-      if (gameRunning) { toast('Opponent disconnected'); backToLobby(); } 
-    });
-    
-    conn.on('error', (err) => {
-      console.error('Connection error:', err);
-      if (connectAttempts < maxAttempts - 1) {
-        connectAttempts++;
-        status('Retrying...', '');
-        setTimeout(tryConnect, 2000);
-      } else {
-        status('Could not connect. Check room name.', 'err');
-      }
-    });
-  }
-  
-  peer.on('open', tryConnect);
   peer.on('error', (e) => { status('Error: ' + e.message, 'err'); });
 }
 
@@ -1004,14 +1008,17 @@ canvas.addEventListener('touchmove', e => {
 
 // ---- Back / Cancel ----
 function cancelRoom() {
+  clearConnectRetry();
   if (peer) { peer.destroy(); peer = null; }
   if (bc) { bc.close(); bc = null; }
+  conn = null;
   hide('waiting');
   document.getElementById('lobby').style.display = 'flex';
   status('READY TO CONNECT');
 }
 
 function backToLobby() {
+  clearConnectRetry();
   sendMsg({ type: 'bye' });
   if (peer) { peer.destroy(); peer = null; conn = null; }
   if (bc) { bc.close(); bc = null; }
