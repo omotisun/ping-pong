@@ -374,43 +374,6 @@
   }
   .toast.show { opacity: 1; }
 
-  #debug-panel {
-    border: 1px solid var(--border);
-    background: rgba(17,17,24,0.88);
-    padding: 1rem;
-    max-width: 420px;
-    margin: 1rem auto 0;
-  }
-
-  .debug-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
-    margin-bottom: 0.6rem;
-  }
-
-  .btn-mini {
-    width: auto;
-    padding: 0.35rem 0.7rem;
-    font-size: 0.6rem;
-    letter-spacing: 0.12em;
-  }
-
-  #debug-log {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    color: var(--text);
-    font-size: 0.68rem;
-    line-height: 1.45;
-    min-height: 120px;
-    max-height: 220px;
-    overflow: auto;
-    padding: 0.75rem;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
   /* Hide classes */
   .hidden { display: none !important; }
 </style>
@@ -454,13 +417,6 @@
 
     <div id="status-bar">READY TO CONNECT</div>
 
-    <div id="debug-panel">
-      <div class="debug-head">
-        <div class="panel-title" style="margin-bottom:0;">Debug Log</div>
-        <button class="btn btn-secondary btn-mini" onclick="clearDebugLog()">CLEAR</button>
-      </div>
-      <div id="debug-log">Log output will appear here.</div>
-    </div>
   </div>
 
   <!-- WAITING ROOM -->
@@ -544,23 +500,11 @@ const MAX_CONNECT_ATTEMPTS = 6;
 // ---- PeerJS CDN ----
 // Loaded dynamically
 function loadPeerJS(cb) {
-  if (window.Peer) {
-    debugLog('PeerJS already loaded.');
-    cb();
-    return;
-  }
-  debugLog('Loading PeerJS from CDN: https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js');
+  if (window.Peer) { cb(); return; }
   const s = document.createElement('script');
   s.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
-  s.onload = () => {
-    debugLog('PeerJS loaded successfully.');
-    cb();
-  };
-  s.onerror = () => {
-    debugLog('PeerJS failed to load from CDN. Falling back to BroadcastChannel.');
-    status('PeerJS load failed, using BroadcastChannel (same tab only)', 'err');
-    cb();
-  };
+  s.onload = cb;
+  s.onerror = () => { status('PeerJS load failed, using BroadcastChannel (same tab only)', 'err'); cb(); };
   document.head.appendChild(s);
 }
 
@@ -572,21 +516,6 @@ function status(msg, cls = '') {
   const el = document.getElementById('status-bar');
   el.textContent = msg;
   el.className = cls;
-}
-function debugLog(msg) {
-  const el = document.getElementById('debug-log');
-  if (!el) return;
-  const stamp = new Date().toLocaleTimeString();
-  const line = '[' + stamp + '] ' + msg;
-  if (el.textContent === 'Log output will appear here.') el.textContent = '';
-  el.textContent += (el.textContent ? '\n' : '') + line;
-  el.scrollTop = el.scrollHeight;
-  console.log('[PONG]', msg);
-}
-function clearDebugLog() {
-  const el = document.getElementById('debug-log');
-  if (!el) return;
-  el.textContent = 'Log output will appear here.';
 }
 function toast(msg) {
   const el = document.getElementById('toast');
@@ -610,7 +539,6 @@ function createRoom() {
   if (!room) { status('Enter a room name', 'err'); return; }
   roomName = room;
   isHost = true;
-  debugLog('Create room requested. room="' + roomName + '" name="' + myName + '"');
 
   document.getElementById('waiting-room-name').textContent = roomName;
   hide('lobby');
@@ -633,7 +561,6 @@ function joinRoom() {
   if (!room) { status('Enter a room name to join', 'err'); return; }
   roomName = room;
   isHost = false;
-  debugLog('Join room requested. room="' + roomName + '" name="' + myName + '"');
 
   loadPeerJS(() => {
     if (window.Peer) {
@@ -734,7 +661,6 @@ function connectToHostPeer() {
   const hostId = peerIdFor(roomName, 'host');
   connectAttempts++;
   status('Connecting to room... (' + connectAttempts + '/' + MAX_CONNECT_ATTEMPTS + ')', '');
-  debugLog('Guest connect attempt ' + connectAttempts + ' to peer "' + hostId + '"');
 
   conn = peer.connect(hostId, { reliable: true });
   let opened = false;
@@ -742,18 +668,15 @@ function connectToHostPeer() {
   conn.on('open', () => {
     opened = true;
     clearConnectRetry();
-    debugLog('Guest connection opened to "' + hostId + '".');
     conn.send({ type: 'join', guestName: myName });
     status('Connected! Starting...', 'ok');
   });
   conn.on('data', handlePeerData);
   conn.on('error', () => {
-    debugLog('Guest connection error before open for "' + hostId + '".');
     if (opened) return;
     retryPeerGuestConnection();
   });
   conn.on('close', () => {
-    debugLog('Guest connection closed for "' + hostId + '". opened=' + opened);
     if (!opened) {
       retryPeerGuestConnection();
       return;
@@ -766,13 +689,11 @@ function retryPeerGuestConnection() {
   clearConnectRetry();
 
   if (connectAttempts >= MAX_CONNECT_ATTEMPTS) {
-    debugLog('Guest connection retries exhausted.');
     status('Could not reach host. Ask Player 1 to create the room first, then try JOIN again.', 'err');
     return;
   }
 
   resetPeerGuestState();
-  debugLog('Retrying guest connection in 1.2 seconds.');
   connectRetryTimer = setTimeout(() => {
     if (peer && !peer.destroyed) connectToHostPeer();
   }, 1200);
@@ -780,14 +701,11 @@ function retryPeerGuestConnection() {
 
 function setupPeerHost() {
   const id = peerIdFor(roomName, 'host');
-  debugLog('Creating host peer with id "' + id + '"');
   peer = new Peer(id);
   peer.on('open', () => {
-    debugLog('Host peer open: "' + id + '"');
     status('Room created! Waiting for opponent...', 'ok');
   });
   peer.on('error', (e) => {
-    debugLog('Host peer error: ' + (e.type || 'unknown') + ' - ' + (e.message || 'no message'));
     if (e.type === 'unavailable-id') {
       status('Room already exists! Try another name.', 'err');
       cancelRoom();
@@ -797,17 +715,11 @@ function setupPeerHost() {
   });
   peer.on('connection', (c) => {
     conn = c;
-    debugLog('Host received incoming connection.');
     conn.on('open', () => {
-      debugLog('Host data connection opened.');
       conn.send({ type: 'welcome', hostName: myName });
     });
     conn.on('data', handlePeerData);
-    conn.on('error', (e) => {
-      debugLog('Host data connection error: ' + ((e && e.type) || 'unknown') + ' - ' + ((e && e.message) || 'no message'));
-    });
     conn.on('close', () => {
-      debugLog('Host data connection closed.');
       if (gameRunning) { toast('Opponent disconnected'); backToLobby(); }
     });
   });
@@ -817,20 +729,14 @@ function setupPeerGuest() {
   connectAttempts = 0;
   clearConnectRetry();
   status('Connecting to room...', '');
-  debugLog('Creating guest peer with random id.');
   peer = new Peer(); // random ID for guest
   peer.on('open', () => {
-    debugLog('Guest peer open: "' + peer.id + '"');
     connectToHostPeer();
   });
-  peer.on('error', (e) => {
-    debugLog('Guest peer error: ' + (e.type || 'unknown') + ' - ' + (e.message || 'no message'));
-    status('Error: ' + e.message, 'err');
-  });
+  peer.on('error', (e) => { status('Error: ' + e.message, 'err'); });
 }
 
 function handlePeerData(d) {
-  debugLog('Received peer message: ' + d.type);
   if (d.type === 'welcome') { startGame(d.hostName); }
   if (d.type === 'join') {
     const gName = d.guestName;
@@ -1109,7 +1015,6 @@ canvas.addEventListener('touchmove', e => {
 
 // ---- Back / Cancel ----
 function cancelRoom() {
-  debugLog('Cancel room invoked.');
   clearConnectRetry();
   if (peer) { peer.destroy(); peer = null; }
   if (bc) { bc.close(); bc = null; }
@@ -1120,7 +1025,6 @@ function cancelRoom() {
 }
 
 function backToLobby() {
-  debugLog('Returning to lobby.');
   clearConnectRetry();
   sendMsg({ type: 'bye' });
   if (peer) { peer.destroy(); peer = null; conn = null; }
