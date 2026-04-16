@@ -706,9 +706,13 @@ function sendMsg(data) {
 // PeerJS Signaling (cross-device via PeerJS cloud)
 // ============================================================
 function peerIdFor(room, role) {
-  // Sanitize for PeerJS: only alphanum and hyphens
-  const safe = room.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 30);
-  return 'pong--' + safe + '--' + role;
+  // Keep IDs simple and PeerJS-safe.
+  const safe = room
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .substring(0, 24) || 'room';
+  return 'pong-' + role + '-' + safe;
 }
 
 function clearConnectRetry() {
