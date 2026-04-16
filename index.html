@@ -636,7 +636,16 @@ function peerIdFor(room, role) {
 
 function setupPeerHost() {
   const id = peerIdFor(roomName, 'host');
-  peer = new Peer(id);
+  peer = new Peer(id, {
+    debug: 1,
+    config: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
+      ]
+    }
+  });
   peer.on('open', () => {
     status('Room created! Waiting for opponent...', 'ok');
   });
@@ -660,7 +669,16 @@ function setupPeerHost() {
 
 function setupPeerGuest() {
   status('Connecting to room...', '');
-  peer = new Peer(); // random ID for guest
+  peer = new Peer(undefined, {
+    debug: 1,
+    config: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
+      ]
+    }
+  });
   peer.on('open', () => {
     const hostId = peerIdFor(roomName, 'host');
     conn = peer.connect(hostId);
