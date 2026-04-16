@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PONG — P2P Multiplayer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --border: #2a2a3a;
+    --accent: #00ff9f;
+    --accent2: #ff006e;
+    --text: #e0e0f0;
+    --muted: #555570;
+    --glow: 0 0 20px rgba(0,255,159,0.4);
+    --glow2: 0 0 20px rgba(255,0,110,0.4);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  /* Grid background */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,255,159,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,255,159,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  #app {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 900px;
+    padding: 20px;
+  }
+
+  .logo {
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900;
+    font-size: clamp(2rem, 8vw, 4rem);
+    text-align: center;
+    letter-spacing: 0.3em;
+    color: var(--accent);
+    text-shadow: var(--glow), 0 0 60px rgba(0,255,159,0.2);
+    margin-bottom: 0.2em;
+  }
+
+  .subtitle {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    margin-bottom: 2.5rem;
+  }
+
+  /* ===== LOBBY ===== */
+  #lobby {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    max-width: 420px;
+    margin: 0 auto;
+  }
+
+  .panel {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    padding: 1.5rem;
+    position: relative;
+  }
+
+  .panel::before {
+    content: '';
+    position: absolute;
+    top: -1px; left: 10px;
+    width: 60px; height: 2px;
+    background: var(--accent);
+  }
+
+  .panel-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+  }
+
+  label {
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  input[type="text"] {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1rem;
+    padding: 0.7rem 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 100%;
+  }
+
+  input[type="text"]:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px rgba(0,255,159,0.2);
+  }
+
+  .btn {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    padding: 0.8rem 1.5rem;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+    width: 100%;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+  .btn-primary:hover {
+    box-shadow: var(--glow);
+    filter: brightness(1.1);
+  }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--accent2);
+    border: 1px solid var(--accent2);
+  }
+
+  .btn-secondary:hover {
+    background: rgba(255,0,110,0.1);
+    box-shadow: var(--glow2);
+  }
+
+  .divider {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.7rem;
+    letter-spacing: 0.2em;
+    position: relative;
+  }
+
+  .divider::before, .divider::after {
+    content: '';
+    position: absolute;
+    top: 50%; width: calc(50% - 30px);
+    height: 1px;
+    background: var(--border);
+  }
+  .divider::before { left: 0; }
+  .divider::after { right: 0; }
+
+  /* ===== STATUS ===== */
+  #status-bar {
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-align: center;
+    min-height: 1.2em;
+    transition: color 0.3s;
+  }
+
+  #status-bar.ok { color: var(--accent); }
+  #status-bar.err { color: var(--accent2); }
+
+  /* ===== WAITING ROOM ===== */
+  #waiting {
+    display: none;
+    text-align: center;
+  }
+
+  .waiting-code {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 2rem;
+    font-weight: 900;
+    color: var(--accent);
+    text-shadow: var(--glow);
+    letter-spacing: 0.3em;
+    margin: 1rem 0;
+    cursor: pointer;
+    border: 1px dashed var(--border);
+    padding: 1rem 2rem;
+    display: inline-block;
+    transition: all 0.2s;
+  }
+
+  .waiting-code:hover {
+    border-color: var(--accent);
+    background: rgba(0,255,159,0.05);
+  }
+
+  .blink {
+    animation: blink 1s step-end infinite;
+  }
+
+  @keyframes blink {
+    50% { opacity: 0.3; }
+  }
+
+  .pulse-ring {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-right: 8px;
+    animation: pulse 1.5s ease-in-out infinite;
+    vertical-align: middle;
+  }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(0,255,159,0.5); }
+    50% { box-shadow: 0 0 0 8px transparent; }
+  }
+
+  /* ===== GAME ===== */
+  #game-container {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .scoreboard {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    max-width: 700px;
+    padding: 0.5rem 1rem;
+    font-family: 'Orbitron', sans-serif;
+  }
+
+  .player-score {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+  }
+
+  .player-name {
+    font-size: 0.6rem;
+    letter-spacing: 0.15em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  .score-val {
+    font-size: 2.5rem;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  .score-left .score-val { color: var(--accent); text-shadow: var(--glow); }
+  .score-right .score-val { color: var(--accent2); text-shadow: var(--glow2); }
+
+  .vs-text {
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 0.3em;
+  }
+
+  canvas {
+    border: 1px solid var(--border);
+    display: block;
+    background: var(--bg);
+    max-width: 100%;
+  }
+
+  .game-info {
+    font-size: 0.65rem;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+  }
+
+  /* ===== OVERLAY ===== */
+  #overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10,10,15,0.92);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    display: none;
+  }
+
+  .overlay-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(1.5rem, 5vw, 3rem);
+    font-weight: 900;
+    letter-spacing: 0.2em;
+    margin-bottom: 1rem;
+  }
+
+  .overlay-sub {
+    color: var(--muted);
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    margin-bottom: 2rem;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    padding: 0.6rem 1.2rem;
+    z-index: 200;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+
+  #debug-panel {
+    border: 1px solid var(--border);
+    background: rgba(17,17,24,0.88);
+    padding: 1rem;
+    max-width: 420px;
+    margin: 1rem auto 0;
+  }
+
+  .debug-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .btn-mini {
+    width: auto;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.6rem;
+    letter-spacing: 0.12em;
+  }
+
+  #debug-log {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 0.68rem;
+    line-height: 1.45;
+    min-height: 120px;
+    max-height: 220px;
+    overflow: auto;
+    padding: 0.75rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* Hide classes */
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- LOBBY -->
+  <div id="lobby">
+    <div class="logo">PONG</div>
+    <div class="subtitle">P2P Multiplayer · WebRTC</div>
+
+    <div class="panel">
+      <div class="panel-title">Player Setup</div>
+      <div class="field">
+        <label>Your Name</label>
+        <input type="text" id="inp-name" placeholder="Player01" maxlength="16">
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Create Room</div>
+      <div class="field">
+        <label>Room Name</label>
+        <input type="text" id="inp-room-create" placeholder="my-room" maxlength="20">
+      </div>
+      <button class="btn btn-primary" onclick="createRoom()">CREATE ROOM</button>
+    </div>
+
+    <div class="divider">OR</div>
+
+    <div class="panel">
+      <div class="panel-title">Join Room</div>
+      <div class="field">
+        <label>Room Name</label>
+        <input type="text" id="inp-room-join" placeholder="friend-room" maxlength="20">
+      </div>
+      <button class="btn btn-secondary" onclick="joinRoom()">JOIN ROOM</button>
+    </div>
+
+    <div id="status-bar">READY TO CONNECT</div>
+
+    <div id="debug-panel">
+      <div class="debug-head">
+        <div class="panel-title" style="margin-bottom:0;">Debug Log</div>
+        <button class="btn btn-secondary btn-mini" onclick="clearDebugLog()">CLEAR</button>
+      </div>
+      <div id="debug-log">Log output will appear here.</div>
+    </div>
+  </div>
+
+  <!-- WAITING ROOM -->
+  <div id="waiting">
+    <div class="panel" style="max-width:420px;margin:0 auto;text-align:center;">
+      <div class="panel-title">Waiting for Opponent</div>
+      <p style="color:var(--muted);font-size:0.75rem;margin-bottom:0.5rem;">Share this room name:</p>
+      <div class="waiting-code" id="waiting-room-name" title="Click to copy" onclick="copyRoomName()">—</div>
+      <p style="color:var(--muted);font-size:0.7rem;margin-top:0.5rem;">
+        <span class="pulse-ring"></span>
+        <span class="blink">Waiting for player 2...</span>
+      </p>
+      <button class="btn btn-secondary" style="margin-top:1.5rem;width:auto;padding:0.6rem 2rem;" onclick="cancelRoom()">CANCEL</button>
+    </div>
+  </div>
+
+  <!-- GAME -->
+  <div id="game-container">
+    <div class="scoreboard">
+      <div class="player-score score-left">
+        <div class="player-name" id="name-left">P1</div>
+        <div class="score-val" id="score-left">0</div>
+      </div>
+      <div class="vs-text">VS</div>
+      <div class="player-score score-right">
+        <div class="player-name" id="name-right">P2</div>
+        <div class="score-val" id="score-right">0</div>
+      </div>
+    </div>
+    <canvas id="canvas" width="700" height="450"></canvas>
+    <div class="game-info" id="game-info">W / S or ↑ / ↓ to move</div>
+  </div>
+
+</div>
+
+<!-- WIN OVERLAY -->
+<div id="overlay">
+  <div class="overlay-title" id="overlay-title">YOU WIN</div>
+  <div class="overlay-sub" id="overlay-sub">Press SPACE or tap to rematch</div>
+  <button class="btn btn-primary" style="max-width:200px;" onclick="requestRematch()">REMATCH</button>
+  <button class="btn btn-secondary" style="max-width:200px;margin-top:0.8rem;" onclick="backToLobby()">LOBBY</button>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================
+// SIGNALING via BroadcastChannel (same-origin) + localStorage
+// For cross-device use, swap signaling to a free service like
+// PeerJS cloud or a tiny Cloudflare Worker.
+// ============================================================
+
+// ---- Game Constants ----
+const W = 700, H = 450;
+const PADDLE_W = 12, PADDLE_H = 80;
+const BALL_SIZE = 10;
+const BALL_SPEED_INIT = 5;
+const SCORE_WIN = 7;
+const FPS = 60;
+
+// ---- State ----
+let myName = '', roomName = '', isHost = false, myScore = 0, oppScore = 0;
+let channel = null;   // BroadcastChannel or null
+let gameRunning = false, gameOver = false;
+let animId = null;
+let keys = {};
+let myPaddleY = H/2 - PADDLE_H/2;
+let oppPaddleY = H/2 - PADDLE_H/2;
+let ball = resetBall(true);
+let rematchRequested = false, rematchPending = false;
+let countdownVal = 3, countdownTimer = null;
+
+// For cross-device: use PeerJS (CDN)
+let peer = null, conn = null;
+let signalingMode = 'broadcast'; // 'broadcast' or 'peerjs'
+let connectRetryTimer = null;
+let connectAttempts = 0;
+const MAX_CONNECT_ATTEMPTS = 6;
+
+// ---- PeerJS CDN ----
+// Loaded dynamically
+function loadPeerJS(cb) {
+  if (window.Peer) {
+    debugLog('PeerJS already loaded.');
+    cb();
+    return;
+  }
+  debugLog('Loading PeerJS from CDN: https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js');
+  const s = document.createElement('script');
+  s.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
+  s.onload = () => {
+    debugLog('PeerJS loaded successfully.');
+    cb();
+  };
+  s.onerror = () => {
+    debugLog('PeerJS failed to load from CDN. Falling back to BroadcastChannel.');
+    status('PeerJS load failed, using BroadcastChannel (same tab only)', 'err');
+    cb();
+  };
+  document.head.appendChild(s);
+}
+
+// ---- UI Helpers ----
+function show(id) { document.getElementById(id).style.display = 'flex'; }
+function hide(id) { document.getElementById(id).style.display = 'none'; }
+function showBlock(id) { document.getElementById(id).style.display = 'block'; }
+function status(msg, cls = '') {
+  const el = document.getElementById('status-bar');
+  el.textContent = msg;
+  el.className = cls;
+}
+function debugLog(msg) {
+  const el = document.getElementById('debug-log');
+  if (!el) return;
+  const stamp = new Date().toLocaleTimeString();
+  const line = '[' + stamp + '] ' + msg;
+  if (el.textContent === 'Log output will appear here.') el.textContent = '';
+  el.textContent += (el.textContent ? '\n' : '') + line;
+  el.scrollTop = el.scrollHeight;
+  console.log('[PONG]', msg);
+}
+function clearDebugLog() {
+  const el = document.getElementById('debug-log');
+  if (!el) return;
+  el.textContent = 'Log output will appear here.';
+}
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2000);
+}
+function copyRoomName() {
+  navigator.clipboard?.writeText(roomName).then(() => toast('Room name copied!')).catch(() => {});
+}
+
+// ---- Room / Signaling ----
+function getMyName() {
+  const v = document.getElementById('inp-name').value.trim();
+  return v || 'Player';
+}
+
+function createRoom() {
+  myName = getMyName();
+  const room = document.getElementById('inp-room-create').value.trim();
+  if (!room) { status('Enter a room name', 'err'); return; }
+  roomName = room;
+  isHost = true;
+  debugLog('Create room requested. room="' + roomName + '" name="' + myName + '"');
+
+  document.getElementById('waiting-room-name').textContent = roomName;
+  hide('lobby');
+  showBlock('waiting');
+
+  loadPeerJS(() => {
+    if (window.Peer) {
+      signalingMode = 'peerjs';
+      setupPeerHost();
+    } else {
+      signalingMode = 'broadcast';
+      setupBroadcastHost();
+    }
+  });
+}
+
+function joinRoom() {
+  myName = getMyName();
+  const room = document.getElementById('inp-room-join').value.trim();
+  if (!room) { status('Enter a room name to join', 'err'); return; }
+  roomName = room;
+  isHost = false;
+  debugLog('Join room requested. room="' + roomName + '" name="' + myName + '"');
+
+  loadPeerJS(() => {
+    if (window.Peer) {
+      signalingMode = 'peerjs';
+      setupPeerGuest();
+    } else {
+      signalingMode = 'broadcast';
+      setupBroadcastGuest();
+    }
+  });
+}
+
+// ============================================================
+// BroadcastChannel Signaling (same-origin only / same device)
+// ============================================================
+let bc = null;
+
+function setupBroadcastHost() {
+  bc = new BroadcastChannel('pong:' + roomName);
+  status('Room created. Waiting for opponent...', 'ok');
+  bc.onmessage = (e) => {
+    const d = e.data;
+    if (d.type === 'join') {
+      bc.postMessage({ type: 'welcome', hostName: myName, guestName: d.guestName });
+      startGame(d.guestName);
+    }
+    if (d.type === 'paddle') oppPaddleY = d.y;
+    if (d.type === 'ball') {
+      // Guest sends correction; host ignores (host is authoritative)
+    }
+    if (d.type === 'rematch') handleRematch();
+    if (d.type === 'bye') backToLobby();
+  };
+}
+
+function setupBroadcastGuest() {
+  status('Connecting...', '');
+  bc = new BroadcastChannel('pong:' + roomName);
+  bc.onmessage = (e) => {
+    const d = e.data;
+    if (d.type === 'welcome') {
+      startGame(d.hostName);
+    }
+    if (d.type === 'ball') {
+      ball.x = d.x; ball.y = d.y;
+      ball.vx = d.vx; ball.vy = d.vy;
+    }
+    if (d.type === 'paddle') oppPaddleY = d.y;
+    if (d.type === 'score') {
+      if (isHost) { myScore = d.host; oppScore = d.guest; }
+      else { myScore = d.guest; oppScore = d.host; }
+      updateScoreUI();
+    }
+    if (d.type === 'rematch') handleRematch();
+    if (d.type === 'bye') backToLobby();
+  };
+  bc.postMessage({ type: 'join', guestName: myName });
+  status('Join request sent. Waiting for host...', '');
+}
+
+function sendMsg(data) {
+  if (signalingMode === 'peerjs' && conn) {
+    try { conn.send(data); } catch(e) {}
+  } else if (bc) {
+    bc.postMessage(data);
+  }
+}
+
+// ============================================================
+// PeerJS Signaling (cross-device via PeerJS cloud)
+// ============================================================
+function peerIdFor(room, role) {
+  // Sanitize for PeerJS: only alphanum and hyphens
+  const safe = room.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 30);
+  return 'pong--' + safe + '--' + role;
+}
+
+function clearConnectRetry() {
+  if (connectRetryTimer) {
+    clearTimeout(connectRetryTimer);
+    connectRetryTimer = null;
+  }
+}
+
+function resetPeerGuestState() {
+  clearConnectRetry();
+  if (conn) {
+    try { conn.close(); } catch (e) {}
+    conn = null;
+  }
+}
+
+function connectToHostPeer() {
+  const hostId = peerIdFor(roomName, 'host');
+  connectAttempts++;
+  status('Connecting to room... (' + connectAttempts + '/' + MAX_CONNECT_ATTEMPTS + ')', '');
+  debugLog('Guest connect attempt ' + connectAttempts + ' to peer "' + hostId + '"');
+
+  conn = peer.connect(hostId, { reliable: true });
+  let opened = false;
+
+  conn.on('open', () => {
+    opened = true;
+    clearConnectRetry();
+    debugLog('Guest connection opened to "' + hostId + '".');
+    conn.send({ type: 'join', guestName: myName });
+    status('Connected! Starting...', 'ok');
+  });
+  conn.on('data', handlePeerData);
+  conn.on('error', () => {
+    debugLog('Guest connection error before open for "' + hostId + '".');
+    if (opened) return;
+    retryPeerGuestConnection();
+  });
+  conn.on('close', () => {
+    debugLog('Guest connection closed for "' + hostId + '". opened=' + opened);
+    if (!opened) {
+      retryPeerGuestConnection();
+      return;
+    }
+    if (gameRunning) { toast('Opponent disconnected'); backToLobby(); }
+  });
+}
+
+function retryPeerGuestConnection() {
+  clearConnectRetry();
+
+  if (connectAttempts >= MAX_CONNECT_ATTEMPTS) {
+    debugLog('Guest connection retries exhausted.');
+    status('Could not reach host. Ask Player 1 to create the room first, then try JOIN again.', 'err');
+    return;
+  }
+
+  resetPeerGuestState();
+  debugLog('Retrying guest connection in 1.2 seconds.');
+  connectRetryTimer = setTimeout(() => {
+    if (peer && !peer.destroyed) connectToHostPeer();
+  }, 1200);
+}
+
+function setupPeerHost() {
+  const id = peerIdFor(roomName, 'host');
+  debugLog('Creating host peer with id "' + id + '"');
+  peer = new Peer(id);
+  peer.on('open', () => {
+    debugLog('Host peer open: "' + id + '"');
+    status('Room created! Waiting for opponent...', 'ok');
+  });
+  peer.on('error', (e) => {
+    debugLog('Host peer error: ' + (e.type || 'unknown') + ' - ' + (e.message || 'no message'));
+    if (e.type === 'unavailable-id') {
+      status('Room already exists! Try another name.', 'err');
+      cancelRoom();
+    } else {
+      status('Connection error: ' + e.message, 'err');
+    }
+  });
+  peer.on('connection', (c) => {
+    conn = c;
+    debugLog('Host received incoming connection.');
+    conn.on('open', () => {
+      debugLog('Host data connection opened.');
+      conn.send({ type: 'welcome', hostName: myName });
+    });
+    conn.on('data', handlePeerData);
+    conn.on('error', (e) => {
+      debugLog('Host data connection error: ' + ((e && e.type) || 'unknown') + ' - ' + ((e && e.message) || 'no message'));
+    });
+    conn.on('close', () => {
+      debugLog('Host data connection closed.');
+      if (gameRunning) { toast('Opponent disconnected'); backToLobby(); }
+    });
+  });
+}
+
+function setupPeerGuest() {
+  connectAttempts = 0;
+  clearConnectRetry();
+  status('Connecting to room...', '');
+  debugLog('Creating guest peer with random id.');
+  peer = new Peer(); // random ID for guest
+  peer.on('open', () => {
+    debugLog('Guest peer open: "' + peer.id + '"');
+    connectToHostPeer();
+  });
+  peer.on('error', (e) => {
+    debugLog('Guest peer error: ' + (e.type || 'unknown') + ' - ' + (e.message || 'no message'));
+    status('Error: ' + e.message, 'err');
+  });
+}
+
+function handlePeerData(d) {
+  debugLog('Received peer message: ' + d.type);
+  if (d.type === 'welcome') { startGame(d.hostName); }
+  if (d.type === 'join') {
+    const gName = d.guestName;
+    conn.send({ type: 'welcome', hostName: myName });
+    startGame(gName);
+  }
+  if (d.type === 'paddle') oppPaddleY = d.y;
+  if (d.type === 'ball') {
+    if (!isHost) { ball.x = d.x; ball.y = d.y; ball.vx = d.vx; ball.vy = d.vy; }
+  }
+  if (d.type === 'score') {
+    if (isHost) { myScore = d.host; oppScore = d.guest; }
+    else { myScore = d.guest; oppScore = d.host; }
+    updateScoreUI();
+  }
+  if (d.type === 'rematch') handleRematch();
+  if (d.type === 'bye') backToLobby();
+}
+
+// ============================================================
+// Game Logic
+// ============================================================
+function startGame(oppName) {
+  hide('lobby');
+  hide('waiting');
+  document.getElementById('overlay').style.display = 'none';
+  show('game-container');
+
+  myScore = 0; oppScore = 0;
+  myPaddleY = oppPaddleY = H/2 - PADDLE_H/2;
+  ball = resetBall(true);
+  gameOver = false;
+  gameRunning = false;
+
+  const leftName = isHost ? myName : oppName;
+  const rightName = isHost ? oppName : myName;
+  document.getElementById('name-left').textContent = leftName;
+  document.getElementById('name-right').textContent = rightName;
+  updateScoreUI();
+
+  if (animId) cancelAnimationFrame(animId);
+  startCountdown();
+}
+
+function startCountdown() {
+  countdownVal = 3;
+  const el = document.getElementById('game-info');
+  el.style.color = 'var(--accent)';
+  el.style.fontSize = '1.5rem';
+  el.style.fontFamily = 'Orbitron, sans-serif';
+
+  function tick() {
+    if (countdownVal > 0) {
+      el.textContent = countdownVal;
+      countdownVal--;
+      countdownTimer = setTimeout(tick, 800);
+    } else {
+      el.textContent = 'GO!';
+      setTimeout(() => {
+        el.textContent = 'W / S or ↑ / ↓  to move';
+        el.style.fontSize = '';
+        el.style.color = '';
+        el.style.fontFamily = '';
+        gameRunning = true;
+        loop();
+      }, 500);
+    }
+  }
+  tick();
+}
+
+function resetBall(serve = false) {
+  const angle = (Math.random() * 60 - 30) * Math.PI / 180;
+  const dir = Math.random() > 0.5 ? 1 : -1;
+  return {
+    x: W/2, y: H/2,
+    vx: Math.cos(angle) * BALL_SPEED_INIT * dir,
+    vy: Math.sin(angle) * BALL_SPEED_INIT
+  };
+}
+
+function updateScoreUI() {
+  document.getElementById('score-left').textContent = isHost ? myScore : oppScore;
+  document.getElementById('score-right').textContent = isHost ? oppScore : myScore;
+}
+
+let lastSend = 0;
+function loop() {
+  if (!gameRunning) return;
+  animId = requestAnimationFrame(loop);
+
+  // Move my paddle
+  const speed = 6;
+  if ((keys['w'] || keys['arrowup']) && myPaddleY > 0) myPaddleY -= speed;
+  if ((keys['s'] || keys['arrowdown']) && myPaddleY < H - PADDLE_H) myPaddleY += speed;
+  myPaddleY = Math.max(0, Math.min(H - PADDLE_H, myPaddleY));
+
+  // Send my paddle
+  const now = Date.now();
+  if (now - lastSend > 16) {
+    sendMsg({ type: 'paddle', y: myPaddleY });
+    lastSend = now;
+  }
+
+  // Host runs ball physics
+  if (isHost) {
+    updateBall();
+    sendMsg({ type: 'ball', x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy });
+  }
+
+  draw();
+}
+
+function updateBall() {
+  ball.x += ball.vx;
+  ball.y += ball.vy;
+
+  // Top/bottom wall
+  if (ball.y - BALL_SIZE/2 <= 0) { ball.y = BALL_SIZE/2; ball.vy *= -1; }
+  if (ball.y + BALL_SIZE/2 >= H) { ball.y = H - BALL_SIZE/2; ball.vy *= -1; }
+
+  // Host is LEFT paddle
+  const lPx = 20, lPy = myPaddleY;
+  const rPx = W - 20 - PADDLE_W, rPy = oppPaddleY;
+
+  // Left (host) paddle collision
+  if (ball.vx < 0 &&
+      ball.x - BALL_SIZE/2 <= lPx + PADDLE_W &&
+      ball.x - BALL_SIZE/2 >= lPx &&
+      ball.y >= lPy && ball.y <= lPy + PADDLE_H) {
+    ball.x = lPx + PADDLE_W + BALL_SIZE/2;
+    const rel = (ball.y - (lPy + PADDLE_H/2)) / (PADDLE_H/2);
+    const angle = rel * (Math.PI/4);
+    const spd = Math.min(Math.sqrt(ball.vx*ball.vx + ball.vy*ball.vy) * 1.05, 18);
+    ball.vx = Math.cos(angle) * spd;
+    ball.vy = Math.sin(angle) * spd;
+  }
+
+  // Right (guest) paddle collision
+  if (ball.vx > 0 &&
+      ball.x + BALL_SIZE/2 >= rPx &&
+      ball.x + BALL_SIZE/2 <= rPx + PADDLE_W &&
+      ball.y >= rPy && ball.y <= rPy + PADDLE_H) {
+    ball.x = rPx - BALL_SIZE/2;
+    const rel = (ball.y - (rPy + PADDLE_H/2)) / (PADDLE_H/2);
+    const angle = rel * (Math.PI/4);
+    const spd = Math.min(Math.sqrt(ball.vx*ball.vx + ball.vy*ball.vy) * 1.05, 18);
+    ball.vx = -(Math.cos(angle) * spd);
+    ball.vy = Math.sin(angle) * spd;
+  }
+
+  // Score
+  if (ball.x < 0) {
+    oppScore++;
+    updateScoreUI();
+    sendMsg({ type: 'score', host: myScore, guest: oppScore });
+    checkWin();
+    ball = resetBall();
+  }
+  if (ball.x > W) {
+    myScore++;
+    updateScoreUI();
+    sendMsg({ type: 'score', host: myScore, guest: oppScore });
+    checkWin();
+    ball = resetBall();
+  }
+}
+
+function checkWin() {
+  if (myScore >= SCORE_WIN || oppScore >= SCORE_WIN) {
+    gameRunning = false;
+    gameOver = true;
+    const iWon = myScore >= SCORE_WIN;
+    showWinOverlay(iWon);
+  }
+}
+
+function showWinOverlay(won) {
+  const ov = document.getElementById('overlay');
+  ov.style.display = 'flex';
+  ov.style.flexDirection = 'column';
+  ov.style.alignItems = 'center';
+  ov.style.justifyContent = 'center';
+  document.getElementById('overlay-title').textContent = won ? '🏆 YOU WIN' : '💀 YOU LOSE';
+  document.getElementById('overlay-title').style.color = won ? 'var(--accent)' : 'var(--accent2)';
+  document.getElementById('overlay-sub').textContent = won ? 'GG! Request a rematch?' : 'Request a rematch?';
+}
+
+function requestRematch() {
+  sendMsg({ type: 'rematch' });
+  rematchRequested = true;
+  document.getElementById('overlay-sub').textContent = 'Waiting for opponent...';
+  document.querySelector('#overlay .btn-primary').disabled = true;
+  if (rematchPending) doRematch();
+}
+
+function handleRematch() {
+  rematchPending = true;
+  if (rematchRequested) doRematch();
+  else document.getElementById('overlay-sub').textContent = 'Opponent wants a rematch! Click REMATCH.';
+}
+
+function doRematch() {
+  rematchRequested = false; rematchPending = false;
+  document.querySelector('#overlay .btn-primary').disabled = false;
+  document.getElementById('overlay').style.display = 'none';
+  myScore = 0; oppScore = 0;
+  myPaddleY = oppPaddleY = H/2 - PADDLE_H/2;
+  ball = resetBall(true);
+  gameOver = false;
+  updateScoreUI();
+  startCountdown();
+}
+
+// ---- Draw ----
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Center dashes
+  ctx.setLineDash([10, 14]);
+  ctx.strokeStyle = '#2a2a3a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(W/2, 0);
+  ctx.lineTo(W/2, H);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // My paddle (left if host, right if guest)
+  const myColor = '#00ff9f';
+  const oppColor = '#ff006e';
+
+  if (isHost) {
+    drawPaddle(20, myPaddleY, myColor);
+    drawPaddle(W - 20 - PADDLE_W, oppPaddleY, oppColor);
+  } else {
+    drawPaddle(20, oppPaddleY, oppColor);
+    drawPaddle(W - 20 - PADDLE_W, myPaddleY, myColor);
+  }
+
+  // Ball
+  ctx.shadowBlur = 20;
+  ctx.shadowColor = '#fff';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(ball.x - BALL_SIZE/2, ball.y - BALL_SIZE/2, BALL_SIZE, BALL_SIZE);
+  ctx.shadowBlur = 0;
+}
+
+function drawPaddle(x, y, color) {
+  ctx.shadowBlur = 15;
+  ctx.shadowColor = color;
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, PADDLE_W, PADDLE_H);
+  ctx.shadowBlur = 0;
+}
+
+// ---- Controls ----
+window.addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  if (e.key === ' ') e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+// Mobile: touch drag
+let touchStartY = null;
+canvas.addEventListener('touchstart', e => { touchStartY = e.touches[0].clientY; }, { passive: true });
+canvas.addEventListener('touchmove', e => {
+  if (!gameRunning || touchStartY == null) return;
+  const dy = e.touches[0].clientY - touchStartY;
+  myPaddleY = Math.max(0, Math.min(H - PADDLE_H, myPaddleY + dy));
+  touchStartY = e.touches[0].clientY;
+}, { passive: true });
+
+// ---- Back / Cancel ----
+function cancelRoom() {
+  debugLog('Cancel room invoked.');
+  clearConnectRetry();
+  if (peer) { peer.destroy(); peer = null; }
+  if (bc) { bc.close(); bc = null; }
+  conn = null;
+  hide('waiting');
+  document.getElementById('lobby').style.display = 'flex';
+  status('READY TO CONNECT');
+}
+
+function backToLobby() {
+  debugLog('Returning to lobby.');
+  clearConnectRetry();
+  sendMsg({ type: 'bye' });
+  if (peer) { peer.destroy(); peer = null; conn = null; }
+  if (bc) { bc.close(); bc = null; }
+  gameRunning = false;
+  if (animId) { cancelAnimationFrame(animId); animId = null; }
+  document.getElementById('overlay').style.display = 'none';
+  hide('game-container');
+  hide('waiting');
+  document.getElementById('lobby').style.display = 'flex';
+  myScore = 0; oppScore = 0;
+  status('READY TO CONNECT');
+}
+
+// Resize canvas for small screens
+function resizeCanvas() {
+  const maxW = Math.min(window.innerWidth - 40, 700);
+  canvas.style.width = maxW + 'px';
+  canvas.style.height = (maxW * H / W) + 'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+</script>
+</body>
+</html>
